@@ -20,11 +20,8 @@ import com.google.android.gms.common.api.ResultCallback;
 import com.google.android.gms.wearable.MessageApi;
 import com.google.android.gms.wearable.NodeApi;
 import com.google.android.gms.wearable.Wearable;
+import android.content.*;
 
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.Locale;
 
 public class MainActivity extends Activity implements SensorEventListener {
     private final String TAG = MainActivity.class.getName();
@@ -33,25 +30,14 @@ public class MainActivity extends Activity implements SensorEventListener {
     private TextView mTextView;
     private SensorManager mSensorManager;
     private GoogleApiClient mGoogleApiClient;
+    private boolean RegisteredSensor = false;
+
     private String mNode;
-    private double x,y,z;
 
-    //////////////////////////////////////////////////////////////////
-    private double v=0;
-    private ArrayList<Double> acc_x = new ArrayList<Double>();
-    private ArrayList<Double> acc_y = new ArrayList<Double>();
-    private ArrayList<Double> acc_z = new ArrayList<Double>();
-    private double acx,acy,acz;
-    private double lacx=0,lacy=0,lacz=0;
-    int arraycount=0;
-    double angle=0;
-
-//////////////////////////////////////////////////////////////////////
-
-
+    private double accx, accy, accz;
+    private double magx, magy, magz;
     int count = 0;
-    //final DateFormat df = new SimpleDateFormat("HH:mm:ssSSS");
-    private Date date;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,7 +48,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         mTextView = (TextView) findViewById(R.id.text);
         mTextView.setTextSize(30.0f);
 
-        mSensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
+        mSensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
 
         mGoogleApiClient = new GoogleApiClient.Builder(this)
                 .addApi(Wearable.API)
@@ -102,9 +88,16 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onResume() {
         super.onResume();
 
-        Sensor sensor = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        mSensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL);
+        mSensorManager.registerListener(
+                this,
+                mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+                SensorManager.SENSOR_DELAY_NORMAL);
+        mSensorManager.registerListener(
+                this,
+                mSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
+                SensorManager.SENSOR_DELAY_NORMAL);
         mGoogleApiClient.connect();
+
     }
 
     @Override
@@ -116,76 +109,38 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        if(count>= 2) {
-            count = 0;
-            if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-                //x = (x * GAIN + event.values[0] * (1 - GAIN));
-                //y = (y * GAIN + event.values[1] * (1 - GAIN));
-                //z = (z * GAIN + event.values[2] * (1 - GAIN));
+        // センサの取得値をそれぞれ保存しておく
+        count++;
+        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+            accx = event.values[0];
+            accy = event.values[1];
+            accz = event.values[2];
+        }
+        if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            magx = event.values[0];
+            magy = event.values[1];
+            magz = event.values[2];
+        }
 
-                //////////////////////////////////////////////////////////////////////////角度，速度
 
-                acc_x.add((double)event.values[0]);
-                acc_y.add((double)event.values[1]);
-                acc_z.add((double)event.values[2]);
-
-                arraycount++;
-
-                if(arraycount==10){
-                    for(int i=0;i<10;i++){
-                        acx+=acc_x.get(i);
-                        acy+=acc_y.get(i);
-                        acz+=acc_z.get(i);
-                    }
-                    acx/=10;
-                    acy/=10;
-                    acz/=10;
-                    arraycount=0;
-
-                    x=lacx-acx;
-                    y=lacy-acy;
-                    z=lacz-acz;
-
-                    v=Math.sqrt(x*x+y*y+z*z);
-
-                    angle=Math.atan2(acy,acx)*57.2958 + 180;
-                    if (mTextView != null)
-
-                        mTextView.setText(String.format("%f度 \n V : %f",angle,v));
-
-                    acc_x.clear();
-                    acc_y.clear();
-                    acc_z.clear();
-
-                    lacx=acx;
-                    lacy=acy;
-                    lacz=acz;
-
-//                    v=0;
-
-                    acx=0;
-                    acy=0;
-                    acz=0;
-                }
-
-/////////////////////////////////////////////////////////////////////////
-
-                int intAngle = (int)angle;
-                //転送セット
-                final String SEND_DATA = intAngle + "," + v ;
-                if (mNode != null) {
-                    Wearable.MessageApi.sendMessage(mGoogleApiClient, mNode, SEND_DATA, null).setResultCallback(new ResultCallback<MessageApi.SendMessageResult>() {
-                        @Override
-                        public void onResult(MessageApi.SendMessageResult result) {
-                            if (!result.getStatus().isSuccess()) {
-                                Log.d(TAG, "ERROR : failed to send Message" + result.getStatus());
-                            }
+        if(count == 100) {
+            mTextView.setText(String.format("%3f\n%3f\n%3f\n%d", accx, accy, accz, count));
+            //転送セット
+            final String SEND_DATA = accx + "," + accy + "," + accz + "," + magx + "," + magy + "," + magz;
+            if (mNode != null) {
+                Wearable.MessageApi.sendMessage(mGoogleApiClient, mNode, SEND_DATA, null).setResultCallback(new ResultCallback<MessageApi.SendMessageResult>() {
+                    @Override
+                    public void onResult(MessageApi.SendMessageResult result) {
+                        if (!result.getStatus().isSuccess()) {
+                            Log.d(TAG, "ERROR : failed to send Message" + result.getStatus());
                         }
-                    });
-                }
+                    }
+                });
             }
-        }else count++;
+            count = 0;
+        }
     }
+
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {

@@ -3,6 +3,8 @@ package com.example.marcy.neconect;
 import android.app.ActionBar;
 import android.app.Activity;
 import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
@@ -11,6 +13,7 @@ import android.widget.TextView;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
 import com.google.android.gms.wearable.MessageApi;
 import com.google.android.gms.wearable.MessageEvent;
 import com.google.android.gms.wearable.Wearable;
@@ -30,33 +33,26 @@ import com.orbotix.common.RobotChangedStateListener;
 import java.util.ArrayList;
 import java.util.List;
 
-import android.app.ActionBar;
-import android.app.Activity;
-import android.graphics.Color;
-import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
-import android.util.Log;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.WindowManager;
-import android.widget.TextView;
-
-import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.wearable.MessageApi;
-import com.google.android.gms.wearable.MessageEvent;
-import com.google.android.gms.wearable.Wearable;
-
-import com.github.mikephil.charting.charts.LineChart;
-import com.github.mikephil.charting.data.Entry;
-import com.github.mikephil.charting.data.LineData;
-import com.github.mikephil.charting.data.LineDataSet;
-import com.github.mikephil.charting.interfaces.datasets.ILineDataSet;
-
 
 public class MainActivity extends Activity implements GoogleApiClient.ConnectionCallbacks,
-        MessageApi.MessageListener, RobotChangedStateListener{
+        MessageApi.MessageListener, RobotChangedStateListener {
     private static final String TAG = MainActivity.class.getName();
+
+    private double velocity;
+    private double magnetic;
+
+    private float[] fAccell = new float[3];
+    private float[] fMagnetic = new float[3];
+
+    private ArrayList<Double> acc_x = new ArrayList<Double>();
+    private ArrayList<Double> acc_y = new ArrayList<Double>();
+    private ArrayList<Double> acc_z = new ArrayList<Double>();
+    private double acx, acy, acz;
+    private double lacx = 0, lacy = 0, lacz = 0;
+    private double x, y, z;
+    int arraycount = 0;
+
+    int count = 0;
 
     private static final int REQUEST_CODE_LOCATION_PERMISSION = 42;
     private ConvenienceRobot mRobot;
@@ -70,10 +66,10 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        DualStackDiscoveryAgent.getInstance().addRobotStateListener( this );
+        DualStackDiscoveryAgent.getInstance().addRobotStateListener(this);
 
-        xTextView = (TextView)findViewById(R.id.xValue);
-        yTextView = (TextView)findViewById(R.id.yValue);
+        xTextView = (TextView) findViewById(R.id.xValue);
+        yTextView = (TextView) findViewById(R.id.yValue);
 
         mGoogleApiClient = new GoogleApiClient.Builder(this)
                 .addConnectionCallbacks(this)
@@ -86,29 +82,29 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
                 .addApi(Wearable.API)
                 .build();
 
-        if( Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ) {
-            int hasLocationPermission = checkSelfPermission( Manifest.permission.ACCESS_COARSE_LOCATION );
-            if( hasLocationPermission != PackageManager.PERMISSION_GRANTED ) {
-                Log.e( "Sphero", "Location permission has not already been granted" );
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            int hasLocationPermission = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION);
+            if (hasLocationPermission != PackageManager.PERMISSION_GRANTED) {
+                Log.e("Sphero", "Location permission has not already been granted");
                 List<String> permissions = new ArrayList<String>();
-                permissions.add( Manifest.permission.ACCESS_COARSE_LOCATION);
-                requestPermissions(permissions.toArray(new String[permissions.size()] ), REQUEST_CODE_LOCATION_PERMISSION );
+                permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+                requestPermissions(permissions.toArray(new String[permissions.size()]), REQUEST_CODE_LOCATION_PERMISSION);
             } else {
-                Log.d( "Sphero", "Location permission already granted" );
+                Log.d("Sphero", "Location permission already granted");
             }
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        switch ( requestCode ) {
+        switch (requestCode) {
             case REQUEST_CODE_LOCATION_PERMISSION: {
-                for( int i = 0; i < permissions.length; i++ ) {
-                    if( grantResults[i] == PackageManager.PERMISSION_GRANTED ) {
+                for (int i = 0; i < permissions.length; i++) {
+                    if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
                         startDiscovery();
-                        Log.d( "Permissions", "Permission Granted: " + permissions[i] );
-                    } else if( grantResults[i] == PackageManager.PERMISSION_DENIED ) {
-                        Log.d( "Permissions", "Permission Denied: " + permissions[i] );
+                        Log.d("Permissions", "Permission Granted: " + permissions[i]);
+                    } else if (grantResults[i] == PackageManager.PERMISSION_DENIED) {
+                        Log.d("Permissions", "Permission Denied: " + permissions[i]);
                     }
                 }
             }
@@ -124,17 +120,17 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
         super.onStart();
         mGoogleApiClient.connect();
 
-        if( Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission( Manifest.permission.ACCESS_COARSE_LOCATION ) == PackageManager.PERMISSION_GRANTED ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startDiscovery();
         }
     }
 
     private void startDiscovery() {
         //If the DiscoveryAgent is not already looking for robots, start discovery.
-        if( !DualStackDiscoveryAgent.getInstance().isDiscovering() ) {
+        if (!DualStackDiscoveryAgent.getInstance().isDiscovering()) {
             try {
-                DualStackDiscoveryAgent.getInstance().startDiscovery( this );
+                DualStackDiscoveryAgent.getInstance().startDiscovery(this);
             } catch (DiscoveryException e) {
                 Log.e("Sphero", "DiscoveryException: " + e.getMessage());
             }
@@ -148,12 +144,12 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
             mGoogleApiClient.disconnect();
         }
         //If the DiscoveryAgent is in discovery mode, stop it.
-        if( DualStackDiscoveryAgent.getInstance().isDiscovering() ) {
+        if (DualStackDiscoveryAgent.getInstance().isDiscovering()) {
             DualStackDiscoveryAgent.getInstance().stopDiscovery();
         }
 
         //If a robot is connected to the device, disconnect it
-        if( mRobot != null ) {
+        if (mRobot != null) {
             mRobot.disconnect();
             mRobot = null;
         }
@@ -163,7 +159,7 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        DualStackDiscoveryAgent.getInstance().addRobotStateListener( null );
+        DualStackDiscoveryAgent.getInstance().addRobotStateListener(null);
     }
 
     @Override
@@ -203,22 +199,99 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
         String msg = messageEvent.getPath();
         String[] value = msg.split(",", 0);
 
-        xTextView.setText(String.valueOf(value[0]));
-        yTextView.setText(String.valueOf(value[1]));
+        fAccell[0] = Float.parseFloat(value[0]);
+        fAccell[1] = Float.parseFloat(value[1]);
+        fAccell[2] = Float.parseFloat(value[2]);
+        fMagnetic[0] = Float.parseFloat(value[3]);
+        fMagnetic[1] = Float.parseFloat(value[4]);
+        fMagnetic[2] = Float.parseFloat(value[5]);
 
-        float angle = Float.parseFloat(value[0]);
-        float velocity = Float.parseFloat((value[1]));
+        Log.v("accx", String.valueOf(fAccell[0]));
+        Log.v("accy", String.valueOf(fAccell[1]));
+        Log.v("accz", String.valueOf(fAccell[2]));
 
-        Log.v("angle", String.valueOf(angle));
-        Log.v("velocity", String.valueOf(velocity));
 
-        if(mRobot != null) {
-            if(velocity < 0.2) {
-                mRobot.stop();
+        acc_x.add((double) fAccell[0]);
+        acc_y.add((double) fAccell[1]);
+        acc_z.add((double) fAccell[2]);
+        arraycount++;
+
+        if (arraycount == 10) {
+            for (int i = 0; i < 10; i++) {
+                acx += acc_x.get(i);
+                acy += acc_y.get(i);
+                acz += acc_z.get(i);
+            }
+            acx /= 10;
+            acy /= 10;
+            acz /= 10;
+            arraycount = 0;
+
+            x = lacx - acx;
+            y = lacy - acy;
+            z = lacz - acz;
+
+
+            velocity = Math.sqrt(x * x + y * y + z * z);
+
+            acc_x.clear();
+            acc_y.clear();
+            acc_z.clear();
+
+            lacx = acx;
+            lacy = acy;
+            lacz = acz;
+
+            acx = 0;
+            acy = 0;
+            acz = 0;
+        }
+
+        // fAccell と fMagnetic から傾きと方位角を計算する
+        if (fAccell != null && fMagnetic != null) {
+            // 回転行列を得る
+            float[] inR = new float[9];
+            SensorManager.getRotationMatrix(
+                    inR,
+                    null,
+                    fAccell,
+                    fMagnetic);
+            // ワールド座標とデバイス座標のマッピングを変換する
+            float[] outR = new float[9];
+            SensorManager.remapCoordinateSystem(
+                    inR,
+                    SensorManager.AXIS_X, SensorManager.AXIS_Y,
+                    outR);
+            // 姿勢を得る
+            float[] fAttitude = new float[3];
+            SensorManager.getOrientation(
+                    outR,
+                    fAttitude);
+
+            if (fAttitude[0] < 0) {
+                magnetic = (double) rad2deg(fAttitude[0]) + 360;
             } else {
-                mRobot.drive(angle, velocity);
+                magnetic = (double) rad2deg(fAttitude[0]);
+            }
+
+            xTextView.setText(String.valueOf(magnetic));
+            xTextView.setText(String.valueOf(velocity));
+
+//                Log.v("velocity", String.valueOf(velocity));
+//                Log.v("magnetic", String.valueOf(magnetic));
+
+            if (mRobot != null) {
+                if (velocity > 1) {
+                    mRobot.drive((float) magnetic, (float) 0.5f);
+                } else {
+                    mRobot.drive((float) magnetic, (float) velocity);
+                }
             }
         }
+    }
+
+    private float rad2deg(float rad) {
+        return rad * (float) 180.0 / (float) Math.PI;
     }
 
     @Override

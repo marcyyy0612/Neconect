@@ -22,6 +22,7 @@ import com.google.android.gms.wearable.NodeApi;
 import com.google.android.gms.wearable.Wearable;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
 
@@ -33,7 +34,21 @@ public class MainActivity extends Activity implements SensorEventListener {
     private SensorManager mSensorManager;
     private GoogleApiClient mGoogleApiClient;
     private String mNode;
-    private float x,y,z;
+    private double x,y,z;
+
+    //////////////////////////////////////////////////////////////////
+    private double v=0;
+    private ArrayList<Double> acc_x = new ArrayList<Double>();
+    private ArrayList<Double> acc_y = new ArrayList<Double>();
+    private ArrayList<Double> acc_z = new ArrayList<Double>();
+    private double acx,acy,acz;
+    private double lacx=0,lacy=0,lacz=0;
+    int arraycount=0;
+    double angle=0;
+
+//////////////////////////////////////////////////////////////////////
+
+
     int count = 0;
     //final DateFormat df = new SimpleDateFormat("HH:mm:ssSSS");
     private Date date;
@@ -107,14 +122,57 @@ public class MainActivity extends Activity implements SensorEventListener {
                 //x = (x * GAIN + event.values[0] * (1 - GAIN));
                 //y = (y * GAIN + event.values[1] * (1 - GAIN));
                 //z = (z * GAIN + event.values[2] * (1 - GAIN));
-                x = event.values[0];
-                y = event.values[1];
-                z = event.values[2];
-                if (mTextView != null)
-                    mTextView.setText(String.format("X : %f\nY : %f\nZ : %f" , x, y, z));
 
+                //////////////////////////////////////////////////////////////////////////角度，速度
+
+                acc_x.add((double)event.values[0]);
+                acc_y.add((double)event.values[1]);
+                acc_z.add((double)event.values[2]);
+
+                arraycount++;
+
+                if(arraycount==10){
+                    for(int i=0;i<10;i++){
+                        acx+=acc_x.get(i);
+                        acy+=acc_y.get(i);
+                        acz+=acc_z.get(i);
+                    }
+                    acx/=10;
+                    acy/=10;
+                    acz/=10;
+                    arraycount=0;
+
+                    x=lacx-acx;
+                    y=lacy-acy;
+                    z=lacz-acz;
+
+                    v=Math.sqrt(x*x+y*y+z*z);
+
+                    angle=Math.atan2(acy,acx)*57.2958 + 180;
+                    if (mTextView != null)
+
+                        mTextView.setText(String.format("%f度 \n V : %f",angle,v));
+
+                    acc_x.clear();
+                    acc_y.clear();
+                    acc_z.clear();
+
+                    lacx=acx;
+                    lacy=acy;
+                    lacz=acz;
+
+//                    v=0;
+
+                    acx=0;
+                    acy=0;
+                    acz=0;
+                }
+
+/////////////////////////////////////////////////////////////////////////
+
+                int intAngle = (int)angle;
                 //転送セット
-                String SEND_DATA = x + "," + y + "," + z;
+                final String SEND_DATA = intAngle + "," + v ;
                 if (mNode != null) {
                     Wearable.MessageApi.sendMessage(mGoogleApiClient, mNode, SEND_DATA, null).setResultCallback(new ResultCallback<MessageApi.SendMessageResult>() {
                         @Override

@@ -58,26 +58,22 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
         MessageApi.MessageListener, RobotChangedStateListener{
     private static final String TAG = MainActivity.class.getName();
 
+    private static final int REQUEST_CODE_LOCATION_PERMISSION = 42;
+    private ConvenienceRobot mRobot;
     private GoogleApiClient mGoogleApiClient;
+
     TextView xTextView;
     TextView yTextView;
-    TextView zTextView;
-    LineChart mChart;
-    int x,y,z;
-
-    String[] names = new String[]{"x-value", "y-value", "z-value"};
-    int[] colors = new int[]{Color.RED, Color.GREEN, Color.BLUE};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        DualStackDiscoveryAgent.getInstance().addRobotStateListener( this );
+
         xTextView = (TextView)findViewById(R.id.xValue);
         yTextView = (TextView)findViewById(R.id.yValue);
-        zTextView = (TextView)findViewById(R.id.zValue);
-        ActionBar ab = getActionBar();
-        //ab.hide();
 
         mGoogleApiClient = new GoogleApiClient.Builder(this)
                 .addConnectionCallbacks(this)
@@ -89,26 +85,85 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
                 })
                 .addApi(Wearable.API)
                 .build();
-        mChart = (LineChart) findViewById(R.id.lineChart);
 
-//        mChart.setDescription(null); // 表のタイトルを空にする
-//        mChart.setData(new LineData()); // 空のLineData型インスタンスを追加
+        if( Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ) {
+            int hasLocationPermission = checkSelfPermission( Manifest.permission.ACCESS_COARSE_LOCATION );
+            if( hasLocationPermission != PackageManager.PERMISSION_GRANTED ) {
+                Log.e( "Sphero", "Location permission has not already been granted" );
+                List<String> permissions = new ArrayList<String>();
+                permissions.add( Manifest.permission.ACCESS_COARSE_LOCATION);
+                requestPermissions(permissions.toArray(new String[permissions.size()] ), REQUEST_CODE_LOCATION_PERMISSION );
+            } else {
+                Log.d( "Sphero", "Location permission already granted" );
+            }
+        }
+    }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        switch ( requestCode ) {
+            case REQUEST_CODE_LOCATION_PERMISSION: {
+                for( int i = 0; i < permissions.length; i++ ) {
+                    if( grantResults[i] == PackageManager.PERMISSION_GRANTED ) {
+                        startDiscovery();
+                        Log.d( "Permissions", "Permission Granted: " + permissions[i] );
+                    } else if( grantResults[i] == PackageManager.PERMISSION_DENIED ) {
+                        Log.d( "Permissions", "Permission Denied: " + permissions[i] );
+                    }
+                }
+            }
+            break;
+            default: {
+                super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+            }
+        }
     }
 
     @Override
     protected void onStart() {
         super.onStart();
         mGoogleApiClient.connect();
+
+        if( Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission( Manifest.permission.ACCESS_COARSE_LOCATION ) == PackageManager.PERMISSION_GRANTED ) {
+            startDiscovery();
+        }
+    }
+
+    private void startDiscovery() {
+        //If the DiscoveryAgent is not already looking for robots, start discovery.
+        if( !DualStackDiscoveryAgent.getInstance().isDiscovering() ) {
+            try {
+                DualStackDiscoveryAgent.getInstance().startDiscovery( this );
+            } catch (DiscoveryException e) {
+                Log.e("Sphero", "DiscoveryException: " + e.getMessage());
+            }
+        }
     }
 
     @Override
     protected void onStop() {
-        super.onStop();
         if (null != mGoogleApiClient && mGoogleApiClient.isConnected()) {
             Wearable.MessageApi.removeListener(mGoogleApiClient, this);
             mGoogleApiClient.disconnect();
         }
+        //If the DiscoveryAgent is in discovery mode, stop it.
+        if( DualStackDiscoveryAgent.getInstance().isDiscovering() ) {
+            DualStackDiscoveryAgent.getInstance().stopDiscovery();
+        }
+
+        //If a robot is connected to the device, disconnect it
+        if( mRobot != null ) {
+            mRobot.disconnect();
+            mRobot = null;
+        }
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        DualStackDiscoveryAgent.getInstance().addRobotStateListener( null );
     }
 
     @Override
@@ -150,42 +205,31 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
 
         xTextView.setText(String.valueOf(value[0]));
         yTextView.setText(String.valueOf(value[1]));
-        zTextView.setText(String.valueOf(value[2]));
 
-//        x =  Integer.parseInt(value[0]);
-//        y =  Integer.parseInt(value[1]);
-//        z =  Integer.parseInt(value[2]);
+        float angle = Float.parseFloat(value[0]);
+        float velocity = Float.parseFloat((value[1]));
 
+        Log.v("angle", String.valueOf(angle));
+        Log.v("velocity", String.valueOf(velocity));
 
-/*        LineData data = mChart.getLineData();
-        if (data != null) {
-            for (int i = 0; i < 3; i++) {
-                ILineDataSet set = data.getDataSetByIndex(i);
-                if (set == null) {
-                    set = createSet(names[i], colors[i]);
-                    data.addDataSet(set);
-                }
-
-                data.addEntry(new Entry(set.getEntryCount(),Float.parseFloat(value[i])), i);
-                data.notifyDataChanged();
+        if(mRobot != null) {
+            if(velocity < 0.2) {
+                mRobot.stop();
+            } else {
+                mRobot.drive(angle, velocity);
             }
-
-            mChart.notifyDataSetChanged();
-            mChart.setVisibleXRangeMaximum(50);
-            mChart.moveViewToX(data.getEntryCount());
-        }*/
-
+        }
     }
-    /*
-    private LineDataSet createSet(String label, int color) {
 
-        LineDataSet set = new LineDataSet(null, label);
-        set.setLineWidth(2.5f);
-        set.setColor(color);
-        set.setDrawCircles(false);
-        set.setDrawValues(false);
-
-        return set;
-
-    }*/
+    @Override
+    public void handleRobotChangedState(Robot robot, RobotChangedStateNotificationType type) {
+        switch (type) {
+            case Online: {
+                //Save the robot as a ConvenienceRobot for additional utility methods
+                Log.v("online", "online");
+                mRobot = new ConvenienceRobot(robot);
+                break;
+            }
+        }
+    }
 }
